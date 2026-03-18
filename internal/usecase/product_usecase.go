@@ -102,7 +102,7 @@ func (p *ProductUseCase) RegisterNewProduct(ctx context.Context, req *AddNewProd
 	}()
 	ctx = context.WithValue(ctx, "tx", tx.Transaction())
 
-	category, err := p.createCategory(ctx, req.Name)
+	category, err := p.createCategory(ctx, req.CategoryName)
 	if err != nil {
 		return nil, e.Wrap(op, err)
 	}
