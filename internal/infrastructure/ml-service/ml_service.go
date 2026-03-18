@@ -3,6 +3,7 @@ package ml_service
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/DRSN-tech/go-backend/pkg/jitter"
 	"github.com/DRSN-tech/go-backend/pkg/logger"
 	"github.com/jimlawless/whereami"
+	"golang.org/x/sync/errgroup"
 )
 
 // MLService клиент для взаимодействия с внешним ML-сервисом
@@ -70,23 +72,24 @@ func (m *MLService) VectorizeRequest(ctx context.Context, req *usecase.Vectorize
 func (m *MLService) vectorizeBatch(ctx context.Context, req *usecase.VectorizeReq) ([]usecase.VectorizeRes, error) {
 	const op = "MLService.vectorizeBatch"
 
-	vectorCh := make(chan usecase.VectorizeRes, len(req.Images))
-	errCh := make(chan error, len(req.Images))
 	sem := make(chan struct{}, m.cfg.MaxConcurrent)
+	var mu sync.Mutex
 
-	var wg sync.WaitGroup
-	for _, image := range req.Images {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+	g, gctx := errgroup.WithContext(ctx)
+	vectors := make([]usecase.VectorizeRes, len(req.Images))
+	for i, image := range req.Images {
+		g.Go(func() error {
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-gctx.Done():
+				return gctx.Err()
+			}
 
 			ext, err := infra.GetExtensionFromMIME(image.MimeType)
 			if err != nil {
 				m.logger.Warnf("%s: image: %s, error: %s", whereami.WhereAmI(), image.Name, err.Error())
-				errCh <- err
-				return
+				return err
 			}
 
 			protoReq := proto.VectorizeRequest{
@@ -94,39 +97,24 @@ func (m *MLService) vectorizeBatch(ctx context.Context, req *usecase.VectorizeRe
 				ImageType: infra.ConvertExtensionToProtoEnum(ext),
 			}
 
-			res, err := m.client.VectorizeImage(ctx, &protoReq)
+			res, err := m.client.VectorizeImage(gctx, &protoReq)
 			if err != nil {
 				m.logger.Warnf("VectorizeImage failed: %v", err)
-				errCh <- err
-				return
+				return err
 			}
 
-			vectorCh <- *usecase.NewVectorizeRes(res.Vector, res.ModelVersion)
-		}()
+			mu.Lock()
+			vectors[i] = *usecase.NewVectorizeRes(res.Vector, res.ModelVersion)
+			mu.Unlock()
+
+			return nil
+		})
 	}
 
-	go func() {
-		wg.Wait()
-		close(errCh)
-		close(vectorCh)
-	}()
-
-	vectors := make([]usecase.VectorizeRes, 0, len(req.Images))
-	for completed := 0; completed < len(req.Images); {
-		select {
-		case vector, ok := <-vectorCh:
-			if ok {
-				vectors = append(vectors, vector)
-				completed++
-			}
-		case err, ok := <-errCh:
-			if ok {
-				return nil, e.Wrap(op, err)
-			}
-		case <-ctx.Done():
-			return nil, e.Wrap(op, ctx.Err())
-		}
+	if err := g.Wait(); err != nil {
+		return nil, e.Wrap(op, err)
 	}
 
+	log.Println("DEBUG: ", vectors)
 	return vectors, nil
 }

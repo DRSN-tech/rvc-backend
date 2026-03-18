@@ -12,6 +12,7 @@ import (
 	"github.com/DRSN-tech/go-backend/internal/usecase"
 	"github.com/DRSN-tech/go-backend/pkg/e"
 	"github.com/DRSN-tech/go-backend/pkg/logger"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/google/uuid"
 )
@@ -37,72 +38,58 @@ func NewMinioInfrastructure(minioRepo usecase.ImageRepository, cfg *cfg.MinIOCfg
 // В случае ошибки отменяет остальные загрузки и запускает очистку уже загруженных файлов.
 func (m *MinioInfrastructure) UploadImages(ctx context.Context, req *usecase.UploadImagesReq) (*usecase.UploadImagesRes, error) {
 	const op = "MinioInfrastructure.UploadImages"
-	// Отмена остальных загрузок при первой ошибке
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	keyCh := make(chan string, len(req.Images))
-	errCh := make(chan error, len(req.Images))
 	sem := make(chan struct{}, m.cfg.UploadImagesLimit)
 
-	var uploadWg sync.WaitGroup
-	for _, image := range req.Images {
-		uploadWg.Add(1)
-		go func() {
-			defer uploadWg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+	g, gctx := errgroup.WithContext(ctx)
+	var mu sync.Mutex
+	keys := make([]string, len(req.Images))
+	for i, image := range req.Images {
+		g.Go(func() error {
+			select {
+			case <-gctx.Done():
+				return gctx.Err()
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			}
 
 			imageID := uuid.NewString()
 			ext, err := infrastructure.GetExtensionFromMIME(image.MimeType)
 			if err != nil {
-				errCh <- fmt.Errorf("invalid mime type %s for %s: %w", image.MimeType, image.Name, err)
-				return
+				return fmt.Errorf("invalid mime type %s for %s: %w", image.MimeType, image.Name, err)
 			}
 			objKey := fmt.Sprintf("%s/%s-%s.%s", req.Name, image.Name, imageID, ext)
 			newImage := domain.NewImage(imageID, m.cfg.BucketName, objKey, image.Data, &image.Size, &image.MimeType)
 
-			key, err := m.minioRepo.Upload(ctx, newImage)
+			key, err := m.minioRepo.Upload(gctx, newImage)
 			if err != nil {
-				errCh <- fmt.Errorf("upload %s failed: %w", image.Name, err)
-				return
+				return fmt.Errorf("upload %s failed: %w", image.Name, err)
 			}
 
-			keyCh <- key
-		}()
+			mu.Lock()
+			keys[i] = key
+			mu.Unlock()
+
+			return nil
+		})
 	}
 
-	go func() {
-		uploadWg.Wait()
-		close(errCh)
-		close(keyCh)
-	}()
-
-	keys := make([]string, 0, len(req.Images))
 	ok := false
 	defer func() {
 		if !ok && len(keys) > 0 {
+			var nonEmptyKeys []string
+			for _, key := range keys {
+				if key != "" {
+					nonEmptyKeys = append(nonEmptyKeys, key)
+				}
+			}
+
 			m.wg.Add(1)
-			go m.cleanupUploadedKeys(keys)
+			go m.cleanupUploadedKeys(nonEmptyKeys)
 		}
 	}()
 
-	for completed := 0; completed < len(req.Images); {
-		select {
-		case key, ok := <-keyCh:
-			if ok {
-				keys = append(keys, key)
-				completed++
-			}
-		case err, ok := <-errCh:
-			if ok {
-				cancel()
-				return nil, e.Wrap(op, err)
-			}
-		case <-ctx.Done():
-			cancel()
-			return nil, e.Wrap(op, ctx.Err())
-		}
+	if err := g.Wait(); err != nil {
+		return nil, e.Wrap(op, err)
 	}
 
 	ok = true
