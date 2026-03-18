@@ -35,6 +35,7 @@
 - **Swagger UI**: `http://localhost:${HTTP_PORT}/swagger/index.html` (по умолчанию `http://localhost:8080/swagger/index.html`)
 - **Kafka UI**: `http://localhost:${KAFKA_UI_PORT}` (по умолчанию `http://localhost:8086`)
 - **MinIO Console**: `http://localhost:${MINIO_CONSOLE_PORT}` (по умолчанию `http://localhost:9001`)
+- **Qdrant**: `http://localhost:{QDRANT_PORT}/dashboard#/collections` (по умолчанию `http://localhost:6333/dashboard#/collections`)
 
 > Все порты настраиваются через `.env`.
 
