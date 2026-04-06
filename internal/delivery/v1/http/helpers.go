@@ -71,13 +71,13 @@ func WriteError(w http.ResponseWriter, err error) {
 	code, msg := ToHTTPResponse(err)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(NewErrorResponse(code, msg))
+	_ = json.NewEncoder(w).Encode(NewErrorResponse(code, msg))
 }
 
 func WriteSuccess(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 // parsePriceToCents converts a string like "599.99" or "600" to int64 cents.
@@ -87,6 +87,8 @@ func WriteSuccess(w http.ResponseWriter, status int, data interface{}) {
 // - negative value
 // - exceeds reasonable limit (e.g. 10^9 rubles)
 func parsePriceToCents(s string) (int64, error) {
+	const maxPriceCents = 9999999
+
 	if strings.TrimSpace(s) == "" {
 		return 0, errors.New("price is empty")
 	}
@@ -96,28 +98,23 @@ func parsePriceToCents(s string) (int64, error) {
 		return 0, e.ErrInvalidPrice
 	}
 
-	// Reject negative
 	if d.LessThan(decimal.Zero) {
 		return 0, e.ErrInvalidPrice
 	}
 
-	// Enforce max value (e.g. 1 billion rubles = 100_000_000_000 cents)
 	maxPrice := decimal.NewFromInt(1_000_000_000).Mul(decimal.NewFromInt(100)) // 1B rub in cents
 	if d.GreaterThan(maxPrice) {
 		return 0, e.ErrInvalidPrice
 	}
 
-	// Check decimal places
 	if d.Exponent() < -2 {
-		return 0, e.ErrPricePrecision // "price must have at most 2 decimal places"
+		return 0, e.ErrPricePrecision
 	}
 
-	// Convert to cents: multiply by 100 and round
 	cents := d.Mul(decimal.NewFromInt(100)).Round(0)
 
-	// Safely convert to int64
 	centsInt := cents.IntPart()
-	if centsInt < 0 || centsInt > 9223372036854775807 { // int64 max, but we have maxPrice
+	if centsInt < 0 || centsInt > maxPriceCents {
 		return 0, e.ErrInvalidPrice
 	}
 
@@ -183,7 +180,7 @@ func readFile(fh *multipart.FileHeader, maxSize int64) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", e.ErrInternalServerError
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	data, err := io.ReadAll(src)
 	if err != nil {
