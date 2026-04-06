@@ -88,7 +88,7 @@ func (db *PgDatabase) RunMigrations(logger logger.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer sqlDb.Close()
+	defer func() { _ = sqlDb.Close() }()
 
 	driver, err := postgres.WithInstance(sqlDb, &postgres.Config{})
 	if err != nil {
