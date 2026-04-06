@@ -266,6 +266,7 @@ func (a *App) initKafka() error {
 
 	if err := producer.EnsureTopic(10 * time.Second); err != nil {
 		a.logger.Errorf(err, "failed to ensure kafka topic")
+		_ = producer.Close()
 		return err
 	}
 
