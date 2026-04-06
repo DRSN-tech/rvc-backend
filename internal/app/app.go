@@ -55,8 +55,9 @@ type App struct {
 	workerCancel context.CancelFunc
 
 	// Servers
-	httpSrv *v1Http.Server
-	grpcSrv *v1Grpc.GRPCServer
+	httpSrv    *v1Http.Server
+	metricsSrv *v1Http.Server
+	grpcSrv    *v1Grpc.GRPCServer
 }
 
 // NewApp создает и инициализирует все компоненты приложения.
@@ -109,6 +110,15 @@ func (a *App) Run() error {
 		if err := a.httpSrv.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			a.logger.Errorf(err, "HTTP server failed")
 			httpErrCh <- err
+		}
+	}()
+
+	metricsErrCh := make(chan error, 1)
+	go func() {
+		a.logger.Infof("Metrics server started on port %s", a.cfg.Metrics.Port)
+		if err := a.metricsSrv.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			a.logger.Errorf(err, "Metrics server failed")
+			metricsErrCh <- err
 		}
 	}()
 
@@ -319,7 +329,7 @@ func (a *App) initServers() error {
 	)
 
 	// gRPC Server
-	a.grpcSrv = v1Grpc.NewGRPCServer(a.cfg.Grpc)
+	a.grpcSrv = v1Grpc.NewGRPCServer(a.cfg.Grpc, a.logger)
 	a.grpcSrv.RegisterServices(productUC, a.logger)
 	a.closer.Add(func(ctx context.Context) error {
 		return a.grpcSrv.Stop(ctx)
@@ -327,11 +337,18 @@ func (a *App) initServers() error {
 
 	// HTTP Server
 	r := chi.NewRouter()
-	router := v1Http.NewRouter(r, a.logger)
-	router.Init(productUC)
+	router := v1Http.NewRouter(r, a.logger, productUC)
+	router.Init()
 	a.httpSrv = v1Http.NewServer(r, a.cfg.Http)
 	a.closer.Add(func(ctx context.Context) error {
 		return a.httpSrv.Stop(ctx)
+	})
+
+	// Metrics
+	metricsMux := v1Http.InitMetricsRouter()
+	a.metricsSrv = v1Http.NewMetricsServer(metricsMux, a.cfg.Metrics)
+	a.closer.Add(func(ctx context.Context) error {
+		return a.metricsSrv.Stop(ctx)
 	})
 
 	return nil
