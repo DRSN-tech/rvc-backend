@@ -17,3 +17,6 @@ stop:
 rebuild: down build
 
 rebuild-clean: down-clean build
+
+go-build:
+	go build ./...
