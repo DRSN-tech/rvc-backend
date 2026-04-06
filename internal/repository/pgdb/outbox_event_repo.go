@@ -3,25 +3,29 @@ package pgdb
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/DRSN-tech/go-backend/internal/repository/pgdb/converter"
 	"github.com/DRSN-tech/go-backend/internal/usecase"
 	"github.com/DRSN-tech/go-backend/pkg/e"
+	"github.com/DRSN-tech/go-backend/pkg/logger"
 	"github.com/DRSN-tech/go-backend/pkg/tr"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jimlawless/whereami"
 )
 
 type OutboxEventRepo struct {
-	pool *pgxpool.Pool
-	conv converter.OutboxEventConverter
+	pool   *pgxpool.Pool
+	conv   converter.OutboxEventConverter
+	logger logger.Logger
 }
 
-func NewOutboxEventRepo(pool *pgxpool.Pool, conv converter.OutboxEventConverter) *OutboxEventRepo {
+func NewOutboxEventRepo(pool *pgxpool.Pool, conv converter.OutboxEventConverter, logger logger.Logger) *OutboxEventRepo {
 	return &OutboxEventRepo{
-		pool: pool,
-		conv: conv,
+		pool:   pool,
+		conv:   conv,
+		logger: logger,
 	}
 }
 
@@ -74,7 +78,9 @@ func (o *OutboxEventRepo) GetAndMarkAsProcessing(ctx context.Context, limit int)
 	}
 	defer func() {
 		if err != nil {
-			tx.Rollback(ctx)
+			if err := tx.Rollback(ctx); err != nil && !errors.Is(err, sql.ErrTxDone) {
+				o.logger.Errorf(err, "rollback failed")
+			}
 		}
 	}()
 
