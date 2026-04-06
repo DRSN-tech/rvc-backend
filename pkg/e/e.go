@@ -21,6 +21,7 @@ var (
 	ErrProductNameRequired  = fmt.Errorf("product name is required")
 	ErrPriceMustBePositive  = fmt.Errorf("price must be positive")
 	ErrNoImages             = fmt.Errorf("no images provided")
+	ErrInvalidImage         = fmt.Errorf("invalid or corrupted image")
 	ErrUnsupportedMediaType = fmt.Errorf("unsupported media type")
 	ErrNoProducts           = fmt.Errorf("no products provided")
 	ErrStatusBadRequest     = fmt.Errorf("status bad request")
