@@ -3,7 +3,6 @@ package ml_service
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -115,6 +114,5 @@ func (m *MLService) vectorizeBatch(ctx context.Context, req *usecase.VectorizeRe
 		return nil, e.Wrap(op, err)
 	}
 
-	log.Println("DEBUG: ", vectors)
 	return vectors, nil
 }
