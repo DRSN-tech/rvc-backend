@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// TODO: добавить кафку и версию продукта
 // ProductUseCase реализует бизнес-логику управления продуктами.
 type ProductUseCase struct {
 	productRepo   ProductRepository
@@ -62,7 +60,7 @@ func (p *ProductUseCase) RegisterNewProduct(ctx context.Context, req *AddNewProd
 	// Валидация данных
 	var err error
 	err = p.validateProduct(req)
-	if err != nil && !errors.Is(err, e.ErrNoImages) {
+	if err != nil {
 		return nil, e.Wrap(op, err)
 	}
 
@@ -112,12 +110,11 @@ func (p *ProductUseCase) RegisterNewProduct(ctx context.Context, req *AddNewProd
 		return nil, e.Wrap(op, err)
 	}
 
-	if req.Images == nil {
-		if upsertRes.NoChanges == true {
-			p.logger.Debugf("%s: images %")
-			return nil, e.Wrap(op, e.ErrNoChanges)
-		}
+	if upsertRes.NoChanges {
+		return nil, e.Wrap(op, e.ErrNoChanges)
+	}
 
+	if req.Images == nil {
 		err = tx.Commit(ctx)
 		if err != nil {
 			return nil, e.Wrap(op, err)
@@ -130,7 +127,6 @@ func (p *ProductUseCase) RegisterNewProduct(ctx context.Context, req *AddNewProd
 
 		return nil, nil
 	}
-
 	// Отправка изображение на ML Service для получения векторов
 	vectors, err := p.getVectors(ctx, req.Images)
 	if err != nil {
@@ -315,6 +311,20 @@ func (p *ProductUseCase) validateProduct(req *AddNewProductReq) error {
 
 	if len(req.Images) == 0 {
 		return e.ErrNoImages
+	}
+
+	for _, img := range req.Images {
+		if len(img.Data) == 0 || img.Size <= 0 {
+			return e.ErrInvalidImage
+		}
+
+		if img.Size != int64(len(img.Data)) {
+			return e.ErrInvalidImage
+		}
+
+		if !strings.HasPrefix(img.MimeType, "image/") {
+			return e.ErrUnsupportedMediaType
+		}
 	}
 
 	return nil
