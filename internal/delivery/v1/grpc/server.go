@@ -3,7 +3,6 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 
 	"github.com/DRSN-tech/go-backend/internal/cfg"
@@ -16,12 +15,14 @@ import (
 type GRPCServer struct {
 	server *grpc.Server
 	cfg    *cfg.GRPCConfig
+	logger logger.Logger
 }
 
-func NewGRPCServer(cfg *cfg.GRPCConfig) *GRPCServer {
+func NewGRPCServer(cfg *cfg.GRPCConfig, logger logger.Logger) *GRPCServer {
 	return &GRPCServer{
 		server: grpc.NewServer(),
 		cfg:    cfg,
+		logger: logger,
 	}
 }
 
@@ -39,7 +40,6 @@ func (s *GRPCServer) Start() error {
 	return s.server.Serve(lis)
 }
 
-// TODO: перенести в app.go логи с logger.Logger
 func (s *GRPCServer) Stop(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
@@ -49,11 +49,11 @@ func (s *GRPCServer) Stop(ctx context.Context) error {
 
 	select {
 	case <-done:
-		log.Println("gRPC server stopped gracefully")
+		s.logger.Infof("gRPC server stopped gracefully")
 		return nil
 	case <-ctx.Done():
 		s.server.Stop()
-		log.Println("gRPC server forced to stop after timeout")
+		s.logger.Warnf("gRPC server forced to stop after timeout")
 		return ctx.Err()
 	}
 }
