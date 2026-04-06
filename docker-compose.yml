@@ -71,8 +71,8 @@ services:
   ml-service:
     build:
       context: ../ml-service # Путь к директории с Dockerfile для ML сервиса (по умолчанию на уровень выше текущей директории)
-    env_file:
-      - .env
+#    env_file:
+#      - .env
     environment:
       - ML_PORT=${ML_PORT:-50051}
       - DOWNLOAD_MODEL=false # Значение true, если нужно скачивать модель из S3
@@ -133,6 +133,7 @@ services:
     ports:
       - "${HTTP_PORT}:${HTTP_PORT}"
       - "${GRPC_PORT}:${GRPC_PORT}"
+      - "${METRICS_PORT}:${METRICS_PORT}"
     env_file:
       - .env
     depends_on:
@@ -152,6 +153,27 @@ services:
       - rvc-drsn.tech
     restart: unless-stopped
 
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"  # хранить 7 дней
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - rvc-drsn.tech
+    depends_on:
+      app:
+        condition: service_started
+
 networks:
   rvc-drsn.tech:
     driver: bridge
@@ -163,3 +185,4 @@ volumes:
   minio_data:
   ml_models:
   kafka_data:
+  prometheus_data:
