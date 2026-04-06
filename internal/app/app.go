@@ -287,7 +287,7 @@ func (a *App) initServers() error {
 	// Repositories
 	productRepo := pgdb.NewProductRepo(a.db.Pool, prConv)
 	categoryRepo := pgdb.NewCategoryRepo(a.db.Pool, catConv)
-	outboxRepo := pgdb.NewOutboxEventRepo(a.db.Pool, outboxConv)
+	outboxRepo := pgdb.NewOutboxEventRepo(a.db.Pool, outboxConv, a.logger)
 	imageRepo := s3Repo.NewImageRepo(a.minioClient, a.cfg.Minio)
 	embRepo := qdrantRepo.NewEmbeddingRepo(a.qdrantClient.Client, a.cfg.Qdrant)
 	cacheRepo := redis.NewCacheRepo(a.redisClient, infoConv, a.cfg.Redis, a.logger)
