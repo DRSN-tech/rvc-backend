@@ -86,7 +86,10 @@ func (w *OutboxWorker) listenOutboxNotifications(ctx context.Context) {
 
 		_, err = conn.Exec(ctx, "LISTEN outbox_pending")
 		if err != nil {
-			conn.Close(ctx)
+			if err := conn.Close(ctx); err != nil {
+				w.logger.Warnf("Failed to close connection: %v", err)
+			}
+
 			return e.Wrap("failed to LISTEN", err)
 		}
 
@@ -98,7 +101,11 @@ func (w *OutboxWorker) listenOutboxNotifications(ctx context.Context) {
 		w.logger.Warnf("Initial connect failed: %v", err)
 		return
 	}
-	defer conn.Close(ctx)
+	defer func() {
+		if err := conn.Close(ctx); err != nil {
+			w.logger.Warnf("Failed to close connection: %v", err)
+		}
+	}()
 
 	for {
 		select {
@@ -116,7 +123,9 @@ func (w *OutboxWorker) listenOutboxNotifications(ctx context.Context) {
 					continue
 				}
 				w.logger.Warnf("Connection lost: %v. Reconnecting...", err)
-				conn.Close(ctx)
+				if err := conn.Close(ctx); err != nil {
+					w.logger.Warnf("Failed to close connection: %v", err)
+				}
 
 				time.Sleep(2 * time.Second)
 				if err := connect(); err != nil {

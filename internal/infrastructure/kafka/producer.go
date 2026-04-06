@@ -71,7 +71,9 @@ func (p *Producer) EnsureTopic(timeout time.Duration) error {
 	if err != nil {
 		return e.Wrap(whereami.WhereAmI(), err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	partitions, err := conn.ReadPartitions(p.cfg.Topic)
 	if err == nil && len(partitions) > 0 {
