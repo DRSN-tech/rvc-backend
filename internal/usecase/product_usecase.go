@@ -2,12 +2,15 @@ package usecase
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/DRSN-tech/go-backend/internal/domain"
 	"github.com/DRSN-tech/go-backend/pkg/e"
 	"github.com/DRSN-tech/go-backend/pkg/logger"
+	"github.com/DRSN-tech/go-backend/pkg/tr"
 	transaction "github.com/avito-tech/go-transaction-manager/drivers/pgxv5/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -78,7 +81,9 @@ func (p *ProductUseCase) RegisterNewProduct(ctx context.Context, req *AddNewProd
 	defer func() {
 		if err != nil {
 			if tx.IsActive() {
-				tx.Rollback(ctx)
+				if err := tx.Rollback(ctx); err != nil && !errors.Is(err, sql.ErrTxDone) {
+					p.logger.Errorf(err, "rollback failed")
+				}
 			}
 
 			if uploaded && imagesRes != nil {
@@ -98,7 +103,7 @@ func (p *ProductUseCase) RegisterNewProduct(ctx context.Context, req *AddNewProd
 			}
 		}
 	}()
-	ctx = context.WithValue(ctx, "tx", tx.Transaction())
+	ctx = context.WithValue(ctx, tr.TxKey, tx.Transaction())
 
 	category, err := p.createCategory(ctx, req.CategoryName)
 	if err != nil {
@@ -183,23 +188,30 @@ func (p *ProductUseCase) GetProductsInfo(ctx context.Context, req *GetProductsRe
 		return nil, e.Wrap(op, e.ErrNoProducts)
 	}
 
-	// Поиск продуктов в хэше
+	// Поиск продуктов в кэше
 	cacheProductsMap, err := p.cacheRepo.GetProducts(ctx, req.IDs)
-	var (
-		nonCacheable []int64
-		cacheable    []ProductInfo
-	)
+	nonCacheable := make([]int64, 0, len(req.IDs))
+	seenNonCacheable := make(map[int64]struct{}, len(req.IDs))
+
 	if err != nil {
-		for _, productId := range req.IDs {
-			nonCacheable = append(nonCacheable, productId)
-		}
-	} else {
-		for _, productId := range req.IDs {
-			if product, ok := cacheProductsMap[productId]; ok {
-				cacheable = append(cacheable, product)
-			} else {
-				nonCacheable = append(nonCacheable, productId)
+		for _, id := range req.IDs {
+			if _, seen := seenNonCacheable[id]; seen {
+				continue
 			}
+			seenNonCacheable[id] = struct{}{}
+			nonCacheable = append(nonCacheable, id)
+		}
+		cacheProductsMap = map[int64]ProductInfo{}
+	} else {
+		for _, id := range req.IDs {
+			if _, ok := cacheProductsMap[id]; ok {
+				continue
+			}
+			if _, seen := seenNonCacheable[id]; seen {
+				continue
+			}
+			seenNonCacheable[id] = struct{}{}
+			nonCacheable = append(nonCacheable, id)
 		}
 	}
 
@@ -211,7 +223,7 @@ func (p *ProductUseCase) GetProductsInfo(ctx context.Context, req *GetProductsRe
 			return nil, e.Wrap(op, err)
 		}
 
-		// Фоновое добавление продуктов в хэш
+		// Фоновое добавление продуктов в кэш
 		go func() {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()
@@ -227,9 +239,9 @@ func (p *ProductUseCase) GetProductsInfo(ctx context.Context, req *GetProductsRe
 		dbProductsMap[productInfo.ID] = productInfo
 	}
 
-	// Формирование результата
+	// Формирование результата с сохранением порядка req.IDs
 	result := make([]ProductInfo, 0, len(req.IDs))
-	notFoundProducts := make([]int64, 0)
+	notFoundProducts := make([]int64, 0, len(nonCacheable))
 	for _, id := range req.IDs {
 		if pr, ok := cacheProductsMap[id]; ok {
 			result = append(result, pr)
