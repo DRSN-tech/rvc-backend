@@ -2,26 +2,25 @@ package cfg
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/DRSN-tech/go-backend/pkg/e"
-	"github.com/DRSN-tech/go-backend/pkg/logger"
 	"github.com/jimlawless/whereami"
 )
 
 type Config struct {
-	Minio  *MinIOCfg
-	Http   *HTTPConfig
-	Grpc   *GRPCConfig
-	Db     *PGDBCfg
-	Qdrant *QdrantCfg
-	Redis  *RedisCfg
-	Ml     *MLServiceCfg
-	Kafka  *KafkaCfg
+	Minio   *MinIOCfg
+	Http    *HTTPConfig
+	Grpc    *GRPCConfig
+	Db      *PGDBCfg
+	Qdrant  *QdrantCfg
+	Redis   *RedisCfg
+	Ml      *MLServiceCfg
+	Kafka   *KafkaCfg
+	Metrics *MetricsConfig
 }
 
 type KafkaCfg struct {
@@ -46,6 +45,10 @@ type HTTPConfig struct {
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 	IdleTimeout  time.Duration
+}
+
+type MetricsConfig struct {
+	Port string
 }
 
 type GRPCConfig struct {
@@ -89,28 +92,28 @@ type MLServiceCfg struct {
 }
 
 // Load безопасно загружает конфигурацию и возвращает ошибку в случае неудачи.
-func Load(log logger.Logger) (*Config, error) {
-	db, err := loadPGDBCfg(log)
+func Load() (*Config, error) {
+	db, err := loadPGDBCfg()
 	if err != nil {
 		return nil, e.Wrap(whereami.WhereAmI(), err)
 	}
 
-	http, err := loadHTTPConfig(log)
+	http, err := loadHTTPConfig()
 	if err != nil {
 		return nil, e.Wrap(whereami.WhereAmI(), err)
 	}
 
-	redis, err := loadRedisCfg(log)
+	redis, err := loadRedisCfg()
 	if err != nil {
 		return nil, e.Wrap(whereami.WhereAmI(), err)
 	}
 
-	minio, err := loadMinIOCfg(log)
+	minio, err := loadMinIOCfg()
 	if err != nil {
 		return nil, e.Wrap(whereami.WhereAmI(), err)
 	}
 
-	qdrant, err := loadQdrantCfg(log)
+	qdrant, err := loadQdrantCfg()
 	if err != nil {
 		return nil, e.Wrap(whereami.WhereAmI(), err)
 	}
@@ -121,15 +124,26 @@ func Load(log logger.Logger) (*Config, error) {
 	}
 
 	return &Config{
-		Minio:  minio,
-		Http:   http,
-		Grpc:   loadGRPCConfig(),
-		Db:     db,
-		Qdrant: qdrant,
-		Redis:  redis,
-		Ml:     loadMLServiceCfg(),
-		Kafka:  kafka,
+		Minio:   minio,
+		Http:    http,
+		Grpc:    loadGRPCConfig(),
+		Db:      db,
+		Qdrant:  qdrant,
+		Redis:   redis,
+		Ml:      loadMLServiceCfg(),
+		Kafka:   kafka,
+		Metrics: loadMetricsCfg(),
 	}, nil
+}
+
+func loadMetricsCfg() *MetricsConfig {
+	const (
+		defaultPort = "2112"
+	)
+
+	port := getEnvOrDefault("METRICS_PORT", defaultPort)
+
+	return &MetricsConfig{Port: port}
 }
 
 func loadKafkaCfg() (*KafkaCfg, error) {
@@ -144,8 +158,6 @@ func loadKafkaCfg() (*KafkaCfg, error) {
 		return nil, fmt.Errorf("KAFKA_BROKERS environment variable is required")
 	}
 	brokers := strings.Split(brokerStr, ",")
-
-	log.Println(brokers) // todo: убрать
 
 	topic := os.Getenv("KAFKA_TOPIC")
 
@@ -174,7 +186,7 @@ func loadKafkaCfg() (*KafkaCfg, error) {
 	}, nil
 }
 
-func loadMinIOCfg(log logger.Logger) (*MinIOCfg, error) {
+func loadMinIOCfg() (*MinIOCfg, error) {
 	const (
 		defaultUseSSL   = false
 		defaultEndpoint = "minio:9000"
@@ -182,7 +194,6 @@ func loadMinIOCfg(log logger.Logger) (*MinIOCfg, error) {
 
 	useSSL, err := strconv.ParseBool(getEnvOrDefault("MINIO_USE_SSL", strconv.FormatBool(defaultUseSSL)))
 	if err != nil {
-		log.Errorf(err, "invalid MINIO_USE_SSL")
 		return nil, err
 	}
 
@@ -196,7 +207,7 @@ func loadMinIOCfg(log logger.Logger) (*MinIOCfg, error) {
 	}, nil
 }
 
-func loadHTTPConfig(log logger.Logger) (*HTTPConfig, error) {
+func loadHTTPConfig() (*HTTPConfig, error) {
 	const (
 		defaultPort         = "8080"
 		defaultReadTimeout  = 5 * time.Second
@@ -208,19 +219,16 @@ func loadHTTPConfig(log logger.Logger) (*HTTPConfig, error) {
 
 	readTimeout, err := parseDurationEnv("HTTP_READ_TIMEOUT", defaultReadTimeout)
 	if err != nil {
-		log.Errorf(err, "invalid HTTP_READ_TIMEOUT")
 		return nil, err
 	}
 
 	writeTimeout, err := parseDurationEnv("HTTP_WRITE_TIMEOUT", defaultWriteTimeout)
 	if err != nil {
-		log.Errorf(err, "invalid HTTP_WRITE_TIMEOUT")
 		return nil, err
 	}
 
 	idleTimeout, err := parseDurationEnv("KEEP_ALIVE", defaultIdleTimeout)
 	if err != nil {
-		log.Errorf(err, "invalid KEEP_ALIVE")
 		return nil, err
 	}
 
@@ -244,7 +252,7 @@ func loadGRPCConfig() *GRPCConfig {
 	}
 }
 
-func loadPGDBCfg(log logger.Logger) (*PGDBCfg, error) {
+func loadPGDBCfg() (*PGDBCfg, error) {
 	const (
 		defaultHost    = "localhost"
 		defaultPort    = "5432"
@@ -254,21 +262,18 @@ func loadPGDBCfg(log logger.Logger) (*PGDBCfg, error) {
 	user := getEnv("POSTGRES_USER")
 	if user == "" {
 		err := fmt.Errorf("POSTGRES_USER is required")
-		log.Errorf(err, "missing POSTGRES_USER")
 		return nil, err
 	}
 
 	password := getEnv("POSTGRES_PASSWORD")
 	if password == "" {
 		err := fmt.Errorf("POSTGRES_PASSWORD is required")
-		log.Errorf(err, "missing POSTGRES_PASSWORD")
 		return nil, err
 	}
 
 	dbName := getEnv("POSTGRES_DB")
 	if dbName == "" {
 		err := fmt.Errorf("POSTGRES_DB is required")
-		log.Errorf(err, "missing POSTGRES_DB")
 		return nil, err
 	}
 
@@ -282,7 +287,7 @@ func loadPGDBCfg(log logger.Logger) (*PGDBCfg, error) {
 	}, nil
 }
 
-func loadQdrantCfg(logger logger.Logger) (*QdrantCfg, error) {
+func loadQdrantCfg() (*QdrantCfg, error) {
 	const (
 		defaultQdrantGRPCPort = "6334"
 		defaultUseTLS         = false
@@ -292,20 +297,17 @@ func loadQdrantCfg(logger logger.Logger) (*QdrantCfg, error) {
 	strPort := getEnvOrDefault("QDRANT_GRPC_PORT", defaultQdrantGRPCPort)
 	port, err := strconv.Atoi(strPort)
 	if err != nil {
-		logger.Errorf(err, "invalid QDRANT_PORT")
 		return nil, err
 	}
 
 	useTLS, err := strconv.ParseBool(getEnvOrDefault("QDRANT_USE_TLS", strconv.FormatBool(defaultUseTLS)))
 	if err != nil {
-		logger.Errorf(err, "invalid QDRANT_USE_TLS")
 		return nil, err
 	}
 
 	strVectorSize := getEnvOrDefault("VECTOR_SIZE", defaultVectorSize)
 	vectorSize, err := strconv.ParseUint(strVectorSize, 10, 64)
 	if err != nil {
-		logger.Errorf(err, "invalid VECTOR_SIZE")
 		return nil, err
 	}
 
@@ -319,7 +321,7 @@ func loadQdrantCfg(logger logger.Logger) (*QdrantCfg, error) {
 	}, nil
 }
 
-func loadRedisCfg(log logger.Logger) (*RedisCfg, error) {
+func loadRedisCfg() (*RedisCfg, error) {
 	const (
 		defaultAddr         = "localhost:6379"
 		defaultDB           = 0
@@ -337,38 +339,32 @@ func loadRedisCfg(log logger.Logger) (*RedisCfg, error) {
 	dbStr := getEnvOrDefault("REDIS_DB_ID", strconv.Itoa(defaultDB))
 	db, err := strconv.Atoi(dbStr)
 	if err != nil {
-		log.Errorf(err, "invalid REDIS_DB_ID")
 		return nil, err
 	}
 
 	maxRetriesStr := getEnvOrDefault("MAX_RETRIES", strconv.Itoa(defaultMaxRetries))
 	maxRetries, err := strconv.Atoi(maxRetriesStr)
 	if err != nil {
-		log.Errorf(err, "invalid MAX_RETRIES")
 		return nil, err
 	}
 
 	dialTimeout, err := parseDurationEnv("DIAL_TIMEOUT", defaultDialTimeout)
 	if err != nil {
-		log.Errorf(err, "invalid DIAL_TIMEOUT")
 		return nil, err
 	}
 
 	readTimeout, err := parseDurationEnv("READ_TIMEOUT", defaultReadTimeout)
 	if err != nil {
-		log.Errorf(err, "invalid READ_TIMEOUT")
 		return nil, err
 	}
 
 	writeTimeout, err := parseDurationEnv("WRITE_TIMEOUT", defaultWriteTimeout)
 	if err != nil {
-		log.Errorf(err, "invalid WRITE_TIMEOUT")
 		return nil, err
 	}
 
 	productTTL, err := parseDurationEnv("PRODUCT_TTL", defaultProductTTL)
 	if err != nil {
-		log.Errorf(err, "invalid PRODUCT_TTL")
 		return nil, err
 	}
 
