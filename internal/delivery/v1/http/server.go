@@ -23,6 +23,15 @@ func NewServer(handler http.Handler, cfg *cfg.HTTPConfig) *Server {
 	}
 }
 
+func NewMetricsServer(handler http.Handler, cfg *cfg.MetricsConfig) *Server {
+	return &Server{
+		httpServer: &http.Server{
+			Addr:    ":" + cfg.Port,
+			Handler: handler,
+		},
+	}
+}
+
 func (s *Server) Run() error {
 	return s.httpServer.ListenAndServe()
 }
