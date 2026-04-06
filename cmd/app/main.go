@@ -16,7 +16,7 @@ import (
 func main() {
 	log := logger.NewSlogLogger()
 
-	cfg, err := config.Load(log)
+	cfg, err := config.Load()
 	if err != nil {
 		log.Errorf(err, "failed to load config")
 		os.Exit(1)
