@@ -1,11 +1,15 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
-	"log"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -50,6 +54,10 @@ func ToHTTPResponse(err error) (int, string) {
 		return http.StatusBadRequest, e.ErrTooManyImages.Error()
 	case errors.Is(err, e.ErrNoImages):
 		return http.StatusBadRequest, e.ErrNoImages.Error()
+	case errors.Is(err, e.ErrFileTooLarge):
+		return http.StatusBadRequest, e.ErrFileTooLarge.Error()
+	case errors.Is(err, e.ErrInvalidImage):
+		return http.StatusBadRequest, e.ErrInvalidImage.Error()
 	case errors.Is(err, e.ErrNoChanges):
 		return http.StatusBadRequest, e.ErrNoChanges.Error()
 	case errors.Is(err, e.ErrUnsupportedMediaType):
@@ -154,8 +162,6 @@ func parseImages(files []*multipart.FileHeader) ([]usecase.ProductImage, error) 
 		return nil, e.ErrNoImages
 	}
 
-	log.Println("DEBUG len(files):", len(files))
-
 	if len(files) > maxImageCount {
 		return nil, e.ErrTooManyImages
 	}
@@ -167,10 +173,6 @@ func parseImages(files []*multipart.FileHeader) ([]usecase.ProductImage, error) 
 			return nil, err
 		}
 		images = append(images, *usecase.NewProductImage(data, mimeType, int64(len(data)), fh.Filename))
-	}
-
-	for _, image := range images {
-		log.Println("DEBUG image:", image.Name)
 	}
 
 	return images, nil
@@ -192,6 +194,34 @@ func readFile(fh *multipart.FileHeader, maxSize int64) ([]byte, string, error) {
 		return nil, "", e.Wrap(fh.Filename, e.ErrFileTooLarge)
 	}
 
+	if len(data) == 0 {
+		return nil, "", e.Wrap(fh.Filename, e.ErrInvalidImage)
+	}
+
 	mimeType := http.DetectContentType(data[:min(len(data), 512)])
+	if err := validateImageData(data, mimeType); err != nil {
+		return nil, "", e.Wrap(fh.Filename, err)
+	}
+
 	return data, mimeType, nil
+}
+
+func validateImageData(data []byte, mimeType string) error {
+	if !strings.HasPrefix(mimeType, "image/") {
+		return e.ErrUnsupportedMediaType
+	}
+
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unknown format") {
+			return e.ErrUnsupportedMediaType
+		}
+		return e.ErrInvalidImage
+	}
+
+	if format == "" || cfg.Width <= 0 || cfg.Height <= 0 {
+		return e.ErrInvalidImage
+	}
+
+	return nil
 }
