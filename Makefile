@@ -1,4 +1,4 @@
-.PHONY: all build down down-clean stop rebuild rebuild-clean
+.PHONY: all build down down-clean stop rebuild rebuild-clean go-build lint
 
 all: build
 
@@ -20,3 +20,6 @@ rebuild-clean: down-clean build
 
 go-build:
 	go build ./...
+
+lint:
+	golangci-lint run ./...
